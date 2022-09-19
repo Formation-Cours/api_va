@@ -14,30 +14,54 @@ var (
 	username = os.Getenv("USER")
 	password = os.Getenv("PASSWORD")
 	hostname = os.Getenv("HOSTNAME") + ":" + os.Getenv("PORT")
-	dbName   = os.Getenv("DB_NAME")
+	dbname   = os.Getenv("DB_NAME")
 )
 
-func dsn() string {
+func dsn(dbName string) string {
 	if strings.TrimSpace(username) == "" ||
 		strings.TrimSpace(password) == "" ||
 		strings.TrimSpace(hostname) == "" ||
-		strings.TrimSpace(dbName) == "" {
+		strings.TrimSpace(dbname) == "" {
 		log.Panicln("Problem Environment variables")
 	}
 	return fmt.Sprintf("%s:%s@tcp(%s)/%s", username, password, hostname, dbName)
 }
 
 func connecDB() *sql.DB {
-	db, err := sql.Open("mysql", dsn())
+	db, err := sql.Open("mysql", dsn(""))
 	if err != nil {
 		log.Println(err)
 	}
+
+	ctx, cancelfunc := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelfunc()
+	_, err = db.ExecContext(ctx, "CREATE DATABASE IF NOT EXISTS "+dbname)
+	if err != nil {
+		log.Printf("Error %s when creating DB\n", err)
+		return nil
+	}
+
+	db.Close()
+
+	db, err = sql.Open("mysql", dsn(dbname))
+	if err != nil {
+		log.Println(err)
+	}
+
 	db.SetConnMaxLifetime(time.Minute * 5)
 	db.SetMaxOpenConns(20)
 	db.SetMaxIdleConns(20)
 
-	ctx, cancelfunc := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancelfunc = context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelfunc()
+
+	ctx, cancelfunc = context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelfunc()
+	err = db.PingContext(ctx)
+	if err != nil {
+		log.Printf("Errors %s pinging DB", err)
+	}
+	log.Printf("Connected to DB %s successfully\n", dbname)
 
 	err = dropUserTable(db)
 	if err != nil {
@@ -57,13 +81,6 @@ func connecDB() *sql.DB {
 		return nil
 	}
 
-	ctx, cancelfunc = context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelfunc()
-	err = db.PingContext(ctx)
-	if err != nil {
-		log.Printf("Errors %s pinging DB", err)
-	}
-	log.Printf("Connected to DB %s successfully\n", dbName)
 	return db
 }
 
